@@ -1,124 +1,142 @@
-function c = pc_correction_contour(p, cfg)
-% PC_CORRECTION_CONTOUR Compute pitch correction contour.
-%   c = pc_correction_contour(p, cfg) calculates target MIDI notes, cents
-%   deviation, shift amount in semitones with one-pole retune speed smoothing,
-%   and playback resynthesis frequency ratio for each frame in p.
-%
-%   Output struct c contains matching column vectors:
-%       c.midiDet     - Detected pitch in fractional MIDI note number.
-%       c.midiTarget  - Target scale note in integer MIDI note number.
-%       c.centsDev    - Deviation in cents = 100 * (midiDet - midiTarget).
-%       c.shiftSemis  - Applied pitch shift in semitones (smoothed and clamped).
-%       c.ratio       - Resynthesis frequency ratio = 2^(shiftSemis / 12).
-%       c.midiOut     - Expected output MIDI note = midiDet + shiftSemis.
+function contour = pc_correction_contour(yin, cfg)
+%PC_CORRECTION_CONTOUR Compute target pitch & smoothed correction contour.
+%   contour = PC_CORRECTION_CONTOUR(yin, cfg) maps detected f0 values to the
+%   selected musical scale with boundary hysteresis (preventing note chatter)
+%   and smooths the target pitch trajectory via a first-order IIR filter
+%   controlled by cfg.retuneMs.
 
-if nargin < 2 || isempty(cfg)
-    cfg = pc_default_config();
-end
-
-% Extract configuration parameters with defaults
-key = 'C';
-scale = 'chromatic';
-strength = 1.0;
-retuneMs = 50;
-maxShiftSemis = 2.0;
-hopSecDefault = 0.005;
-
-if isfield(cfg, 'key'), key = cfg.key; end
-if isfield(cfg, 'scale'), scale = cfg.scale; end
-if isfield(cfg, 'strength'), strength = cfg.strength; end
-if isfield(cfg, 'retuneMs'), retuneMs = cfg.retuneMs; end
-if isfield(cfg, 'maxShiftSemis'), maxShiftSemis = cfg.maxShiftSemis; end
-if isfield(cfg, 'yin') && isfield(cfg.yin, 'hopSec')
-    hopSecDefault = cfg.yin.hopSec;
-end
-
-N_frames = numel(p.t);
-if N_frames == 0
-    c.midiDet = zeros(0, 1);
-    c.midiTarget = zeros(0, 1);
-    c.centsDev = zeros(0, 1);
-    c.shiftSemis = zeros(0, 1);
-    c.ratio = zeros(0, 1);
-    c.midiOut = zeros(0, 1);
-    return;
-end
-
-% Scale pitch classes
-pcs = pc_scale_pcs(key, scale);
-
-% Voiced masking and MIDI conversion
-f0_voiced = p.f0(:);
-if isfield(p, 'voiced')
-    f0_voiced(~p.voiced) = NaN;
-end
-
-midiDet = pc_hz2midi(f0_voiced);
-isVoicedFrame = ~isnan(midiDet);
-
-midiTarget = pc_snap_to_scale(midiDet, pcs);
-centsDev = 100 * (midiDet - midiTarget);
-
-% Raw shift: strength * (target - detected), clamped to maxShiftSemis
-rawShift = nan(N_frames, 1);
-rawShift(isVoicedFrame) = strength * (midiTarget(isVoicedFrame) - midiDet(isVoicedFrame));
-rawShift(isVoicedFrame) = max(-maxShiftSemis, min(maxShiftSemis, rawShift(isVoicedFrame)));
-
-% Determine hop time Thop
-if N_frames > 1
-    diffT = diff(p.t);
-    Thop = median(diffT);
-    if isnan(Thop) || Thop <= 0
-        Thop = hopSecDefault;
+    arguments
+        yin struct
+        cfg struct = pc_default_config()
     end
-else
-    Thop = hopSecDefault;
-end
 
-% One-pole retune smoothing parameter alpha
-if retuneMs <= 0
-    alpha = 1.0;
-else
-    tauSec = retuneMs / 1000;
-    alpha = 1.0 - exp(-Thop / tauSec);
-end
+    numFrames = numel(yin.f0);
+    voiced    = logical(yin.voiced(:));
+    f0        = yin.f0(:);
 
-% State tracking and output arrays
-shiftSemis = zeros(N_frames, 1);
-ratio = ones(N_frames, 1);
-midiOut = nan(N_frames, 1);
-
-s_prev = 0;
-for n = 1:N_frames
-    if isVoicedFrame(n)
-        % Reset smoothing filter state on voiced-run onset
-        if (n == 1) || (~isVoicedFrame(n - 1))
-            s_prev = 0;
-        end
-        
-        % One-pole smoothing update
-        s_curr = s_prev + alpha * (rawShift(n) - s_prev);
-        
-        % Clamp shift to [-maxShiftSemis, maxShiftSemis]
-        s_curr = max(-maxShiftSemis, min(maxShiftSemis, s_curr));
-        
-        shiftSemis(n) = s_curr;
-        ratio(n) = 2^(s_curr / 12);
-        midiOut(n) = midiDet(n) + s_curr;
-        
-        s_prev = s_curr;
+    if isfield(yin, 'tFrames')
+        tFrames = yin.tFrames(:);
+    elseif isfield(yin, 't')
+        tFrames = yin.t(:);
     else
-        s_prev = 0;
-        shiftSemis(n) = 0;
-        ratio(n) = 1.0;
-        midiOut(n) = NaN;
+        hopMs = 5;
+        if isfield(cfg, 'yinHopMs'), hopMs = cfg.yinHopMs; end
+        tFrames = (0:numFrames-1)' * (hopMs * 1e-3);
     end
-end
 
-c.midiDet = midiDet(:);
-c.midiTarget = midiTarget(:);
-c.centsDev = centsDev(:);
-c.shiftSemis = shiftSemis(:);
-c.ratio = ratio(:);
-c.midiOut = midiOut(:);
+    midiDet    = NaN(numFrames, 1);
+    midiTarget = NaN(numFrames, 1);
+    midiOut    = NaN(numFrames, 1);
+    shiftSemis = zeros(numFrames, 1);
+    pitchRatio = ones(numFrames, 1);
+    f0Target   = NaN(numFrames, 1);
+    f0Corr     = NaN(numFrames, 1);
+    centsIn    = NaN(numFrames, 1);
+    centsOut   = NaN(numFrames, 1);
+
+    scalePcs = pc_scale_pcs(cfg.key, cfg.scale);
+    hyst = 0.0;
+    if isfield(cfg, 'hysteresisSemis')
+        hyst = max(0, cfg.hysteresisSemis);
+    end
+    maxShift = 12.0;
+    if isfield(cfg, 'maxShiftSemis')
+        maxShift = max(0, cfg.maxShiftSemis);
+    end
+    minRatio = 0.5;
+    if isfield(cfg, 'minPitchRatio'), minRatio = cfg.minPitchRatio; end
+    maxRatio = 2.0;
+    if isfield(cfg, 'maxPitchRatio'), maxRatio = cfg.maxPitchRatio; end
+
+    if any(voiced)
+        midiDet(voiced)    = pc_hz2midi(f0(voiced));
+        midiTarget(voiced) = pc_snap_to_scale(midiDet(voiced), scalePcs);
+
+        % Apply scale-boundary hysteresis within contiguous voiced runs
+        % so hovering near a midpoint between two scale notes does not chatter
+        if hyst > 0
+            for i = 2:numFrames
+                if voiced(i) && voiced(i-1)
+                    prevTarget = midiTarget(i-1);
+                    currTarget = midiTarget(i);
+                    if currTarget ~= prevTarget
+                        distPrev = abs(midiDet(i) - prevTarget);
+                        distCurr = abs(midiDet(i) - currTarget);
+                        if distPrev <= distCurr + hyst
+                            midiTarget(i) = prevTarget;
+                        end
+                    end
+                end
+            end
+        end
+
+        f0Target(voiced) = pc_midi2hz(midiTarget(voiced));
+        centsIn(voiced)  = 100 * (midiDet(voiced) - midiTarget(voiced));
+    end
+
+    % Determine frame hop dt (seconds)
+    if numel(tFrames) >= 2
+        dt = median(diff(tFrames));
+    elseif isfield(cfg, 'yinHopMs')
+        dt = cfg.yinHopMs * 1e-3;
+    else
+        dt = 0.005;
+    end
+
+    if cfg.retuneMs <= 0
+        beta = 0; % Instantaneous snap (alpha = 1)
+    else
+        tau  = cfg.retuneMs * 1e-3;
+        beta = exp(-dt / tau);
+    end
+
+    p_prev = NaN;
+    for i = 1:numFrames
+        if voiced(i)
+            % Clamp target pitch excursion by maxShiftSemis relative to midiDet
+            clampedTarget = midiDet(i) + min(max(midiTarget(i) - midiDet(i), -maxShift), maxShift);
+
+            % Onset of voiced run starts from initial detected pitch midiDet(i)
+            % and converges exponentially toward clampedTarget with time constant tau.
+            % On frame k of a run with constant target T, p_curr - midiDet = (1 - beta^k)*(T - midiDet),
+            % while on sustained vocal notes p_curr locks onto T and cancels vibrato/drift!
+            if i == 1 || ~voiced(i-1) || isnan(p_prev)
+                p_prev = midiDet(i);
+            end
+            p_curr = beta * p_prev + (1 - beta) * clampedTarget;
+            p_prev = p_curr;
+
+            s_curr = cfg.strength * (p_curr - midiDet(i));
+            s_curr = min(max(s_curr, -maxShift), maxShift);
+            shiftSemis(i) = s_curr;
+
+            r = 2^(s_curr / 12);
+            r = min(max(r, minRatio), maxRatio);
+            pitchRatio(i) = r;
+
+            midiOut(i)  = midiDet(i) + s_curr;
+            f0Corr(i)   = f0(i) * r;
+            centsOut(i) = 100 * (midiOut(i) - midiTarget(i));
+        else
+            p_prev = NaN;
+            shiftSemis(i) = 0;
+            pitchRatio(i) = 1.0;
+        end
+    end
+
+    contour = struct( ...
+        'midiDet',    midiDet, ...
+        'midiTarget', midiTarget, ...
+        'midiOut',    midiOut, ...
+        'f0Target',   f0Target, ...
+        'f0Corr',     f0Corr, ...
+        'shiftSemis', shiftSemis, ...
+        'ratio',      pitchRatio, ...
+        'pitchRatio', pitchRatio, ...
+        'centsDev',   centsIn, ...
+        'centsIn',    centsIn, ...
+        'centsOut',   centsOut, ...
+        'voiced',     voiced, ...
+        't',          tFrames, ...
+        'tFrames',    tFrames);
 end
