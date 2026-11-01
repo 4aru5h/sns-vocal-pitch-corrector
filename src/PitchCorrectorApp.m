@@ -20,7 +20,7 @@ for idx = 1:2:numel(varargin)
 end
 
 fig = uifigure('Name', 'AutoTune Vocal Pitch Corrector (SNS)', ...
-               'Position', [100, 100, 1200, 750], ...
+               'Position', [100, 80, 1220, 780], ...
                'Visible', p_vis);
 
 % State variables
@@ -32,18 +32,35 @@ audioData.recorder = [];
 
 % Main 2-row layout: Top Controls, Bottom Visualizations
 mainGrid = uigridlayout(fig, [2, 1]);
-mainGrid.RowHeight = {160, '1x'};
+mainGrid.RowHeight = {190, '1x'};
 mainGrid.Padding = [10, 10, 10, 10];
 
 % Controls Panel
-ctrlPanel = uipanel(mainGrid, 'Title', 'Control Panel', 'FontWeight', 'bold');
-ctrlGrid = uigridlayout(ctrlPanel, [3, 6]);
-ctrlGrid.RowHeight = {35, 35, 35};
-ctrlGrid.ColumnWidth = {'1x', '1x', '1x', '1.2x', '1.2x', '1.2x'};
+ctrlPanel = uipanel(mainGrid, 'Title', 'Control Panel & Audio I/O', 'FontWeight', 'bold');
+ctrlGrid = uigridlayout(ctrlPanel, [4, 6]);
+ctrlGrid.RowHeight = {32, 32, 32, 28};
+ctrlGrid.ColumnWidth = {'1x', '1.2x', '0.8x', '1.2x', '1.2x', '1.2x'};
 
-% Row 1 Controls: Load, Record, Duration, Key, Scale, Process
-btnLoad = uibutton(ctrlGrid, 'Text', 'Load WAV...', 'ButtonPushedFcn', @onLoadWav);
-btnRecord = uibutton(ctrlGrid, 'Text', 'Record Mic', 'ButtonPushedFcn', @onRecord);
+% Query audio input devices
+devNames = {'[Default] Windows Sound Capture'};
+devIDs = [-1];
+try
+    devs = audiodevinfo;
+    if isstruct(devs) && isfield(devs, 'input') && ~isempty(devs.input)
+        for k = 1:numel(devs.input)
+            devNames{end+1} = sprintf('[%d] %s', devs.input(k).ID, devs.input(k).Name);
+            devIDs(end+1) = devs.input(k).ID;
+        end
+    end
+catch
+    % Fallback to default
+end
+
+% Row 1 Controls: Audio Input selection, Load WAV, Record, Duration, Process
+btnLoad = uibutton(ctrlGrid, 'Text', 'Load WAV...', 'FontWeight', 'bold', 'ButtonPushedFcn', @onLoadWav);
+
+dropDevice = uidropdown(ctrlGrid, 'Items', devNames, 'Value', devNames{1});
+dropDevice.Tooltip = 'Select your microphone input device';
 
 durPanel = uipanel(ctrlGrid, 'BorderType', 'none');
 durGrid = uigridlayout(durPanel, [1, 2]);
@@ -51,27 +68,45 @@ durGrid.Padding = [0 0 0 0];
 uilabel(durGrid, 'Text', 'Dur (s):', 'HorizontalAlignment', 'right');
 numDuration = uieditfield(durGrid, 'numeric', 'Value', 3, 'Limits', [0.5, 30]);
 
+btnRecord = uibutton(ctrlGrid, 'Text', 'Record Mic', 'FontWeight', 'bold', ...
+                     'BackgroundColor', [0.85 0.25 0.2], 'FontColor', 'w', ...
+                     'ButtonPushedFcn', @onRecord);
+
+btnProcess = uibutton(ctrlGrid, 'Text', 'Process Pitch', 'FontWeight', 'bold', ...
+                      'BackgroundColor', [0.15 0.65 0.25], 'FontColor', 'w', ...
+                      'ButtonPushedFcn', @onProcess);
+btnProcess.Layout.Column = [5, 6];
+
+% Row 2 Controls: Musical parameters (Key, Scale, Strength, Retune)
+uilabel(ctrlGrid, 'Text', 'Musical Key:', 'HorizontalAlignment', 'right', 'FontWeight', 'bold');
 dropKey = uidropdown(ctrlGrid, 'Items', {'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'}, 'Value', 'C');
+
+uilabel(ctrlGrid, 'Text', 'Target Scale:', 'HorizontalAlignment', 'right', 'FontWeight', 'bold');
 dropScale = uidropdown(ctrlGrid, 'Items', {'chromatic', 'major', 'minor'}, 'Value', 'chromatic');
-btnProcess = uibutton(ctrlGrid, 'Text', 'Process Pitch', 'FontWeight', 'bold', 'BackgroundColor', [0.15 0.65 0.25], 'FontColor', 'w', 'ButtonPushedFcn', @onProcess);
 
-% Row 2 Controls: Sliders and Labels
 lblStrength = uilabel(ctrlGrid, 'Text', 'Strength: 100%', 'HorizontalAlignment', 'right');
-sldStrength = uislider(ctrlGrid, 'Limits', [0, 100], 'Value', 100, 'ValueChangedFcn', @(s,e) set(lblStrength, 'Text', sprintf('Strength: %d%%', round(s.Value))));
+sldStrength = uislider(ctrlGrid, 'Limits', [0, 100], 'Value', 100, ...
+    'ValueChangedFcn', @(s,e) set(lblStrength, 'Text', sprintf('Strength: %d%%', round(s.Value))));
 
+% Row 3 Controls: Retune slider, Playback, Export
 lblRetune = uilabel(ctrlGrid, 'Text', 'Retune: 50 ms', 'HorizontalAlignment', 'right');
-sldRetune = uislider(ctrlGrid, 'Limits', [0, 400], 'Value', 50, 'ValueChangedFcn', @(s,e) set(lblRetune, 'Text', sprintf('Retune: %d ms', round(s.Value))));
+sldRetune = uislider(ctrlGrid, 'Limits', [0, 400], 'Value', 50, ...
+    'ValueChangedFcn', @(s,e) set(lblRetune, 'Text', sprintf('Retune: %d ms', round(s.Value))));
 
-dropSpec = uidropdown(ctrlGrid, 'Items', {'corrected', 'original'}, 'Value', 'corrected', 'ValueChangedFcn', @onSpecToggle);
-btnExport = uibutton(ctrlGrid, 'Text', 'Export WAV...', 'ButtonPushedFcn', @onExportWav);
-
-% Row 3 Controls: Playback & Status
-btnPlayOrig = uibutton(ctrlGrid, 'Text', 'Play Original', 'ButtonPushedFcn', @onPlayOrig);
-btnPlayCorr = uibutton(ctrlGrid, 'Text', 'Play Corrected', 'ButtonPushedFcn', @onPlayCorr);
+btnPlayOrig = uibutton(ctrlGrid, 'Text', 'Play Original', 'FontWeight', 'bold', 'ButtonPushedFcn', @onPlayOrig);
+btnPlayCorr = uibutton(ctrlGrid, 'Text', 'Play Corrected', 'FontWeight', 'bold', ...
+                       'BackgroundColor', [0.2 0.5 0.8], 'FontColor', 'w', ...
+                       'ButtonPushedFcn', @onPlayCorr);
 btnStop = uibutton(ctrlGrid, 'Text', 'Stop Audio', 'ButtonPushedFcn', @onStopAudio);
 
-lblStatus = uilabel(ctrlGrid, 'Text', 'Status: Ready. Load a WAV file or record to begin.', 'FontWeight', 'bold');
-lblStatus.Layout.Column = [4, 6];
+btnExport = uibutton(ctrlGrid, 'Text', 'Export WAV...', 'ButtonPushedFcn', @onExportWav);
+
+% Row 4: Spectrogram toggle & Status
+lblStatus = uilabel(ctrlGrid, 'Text', 'Status: Ready. Load a WAV file or click Record Mic to begin.', 'FontWeight', 'bold');
+lblStatus.Layout.Column = [1, 5];
+
+dropSpec = uidropdown(ctrlGrid, 'Items', {'corrected', 'original'}, 'Value', 'corrected', ...
+                       'Tooltip', 'Spectrogram view toggle', 'ValueChangedFcn', @onSpecToggle);
 
 % Visualisation Grid: 3 Axes
 visGrid = uigridlayout(mainGrid, [1, 3]);
@@ -87,6 +122,15 @@ title(axPitch, 'Pitch Contours');
 axSpec = uiaxes(visGrid);
 title(axSpec, 'Spectrogram');
 
+% Helper to get selected device ID
+    function devId = getSelectedDeviceId()
+        devId = -1;
+        selIdx = find(strcmp(dropDevice.Value, devNames), 1);
+        if ~isempty(selIdx) && selIdx <= numel(devIDs)
+            devId = devIDs(selIdx);
+        end
+    end
+
 % Callback Implementations
     function onLoadWav(~, ~)
         try
@@ -94,7 +138,15 @@ title(axSpec, 'Spectrogram');
             if isequal(file, 0), return; end
             fullPath = fullfile(path, file);
             [audioData.xIn, audioData.fs] = audioread(fullPath);
-            lblStatus.Text = sprintf('Status: Loaded "%s" (%d samples, %d Hz).', file, numel(audioData.xIn), audioData.fs);
+            peakVal = max(abs(audioData.xIn(:)));
+            lblStatus.Text = sprintf('Status: Loaded "%s" (%d samples, %d Hz, peak = %.3f).', file, size(audioData.xIn, 1), audioData.fs, peakVal);
+            
+            % Plot waveform immediately
+            cla(axWave);
+            t_ax = (0 : size(audioData.xIn, 1) - 1)' / audioData.fs;
+            plot(axWave, t_ax, audioData.xIn(:, 1), 'Color', [0.2 0.4 0.8], 'LineWidth', 1.0);
+            title(axWave, sprintf('Loaded Audio: %s (Peak = %.3f)', file, peakVal));
+            xlabel(axWave, 'Time (s)'); ylabel(axWave, 'Amplitude'); grid(axWave, 'on');
         catch ME
             uialert(fig, ME.message, 'File Load Error');
         end
@@ -103,14 +155,46 @@ title(axSpec, 'Spectrogram');
     function onRecord(~, ~)
         try
             dur = numDuration.Value;
-            lblStatus.Text = sprintf('Status: Recording for %.1f s...', dur);
+            lblStatus.Text = sprintf('Status: RECORDING NOW (%.1f s)... Please sing / speak into your microphone!', dur);
+            lblStatus.FontColor = [0.85 0.15 0.1];
             drawnow;
-            rec = audiorecorder(44100, 16, 1);
+            
+            devId = getSelectedDeviceId();
+            if devId >= 0
+                rec = audiorecorder(44100, 16, 1, devId);
+            else
+                rec = audiorecorder(44100, 16, 1);
+            end
+            
             recordblocking(rec, dur);
             audioData.xIn = getaudiodata(rec);
             audioData.fs = 44100;
-            lblStatus.Text = sprintf('Status: Recorded %.1f s at 44.1 kHz.', dur);
+            lblStatus.FontColor = [0 0 0];
+            
+            recPeak = max(abs(audioData.xIn));
+            
+            % Immediately render waveform on axWave so user gets visual feedback
+            cla(axWave);
+            t_ax = (0 : numel(audioData.xIn) - 1)' / audioData.fs;
+            plot(axWave, t_ax, audioData.xIn, 'Color', [0.2 0.4 0.8], 'LineWidth', 1.0);
+            title(axWave, sprintf('Recorded Input Waveform (Peak = %.4f)', recPeak));
+            xlabel(axWave, 'Time (s)'); ylabel(axWave, 'Amplitude'); grid(axWave, 'on');
+            ylim(axWave, [-max(0.05, recPeak * 1.2), max(0.05, recPeak * 1.2)]);
+            
+            if recPeak < 0.005
+                lblStatus.Text = sprintf('Status: Warning: Input is near silent (Peak = %.5f). Check microphone mute / volume.', recPeak);
+                uialert(fig, sprintf(['Your microphone recorded near-silence (Peak = %.6f).\n\n' ...
+                    'Common reasons:\n' ...
+                    '1. Hardware/Fn mute key: Check if your keyboard microphone mute key (e.g. F4 / Fn+F4) is active.\n' ...
+                    '2. Low Windows input volume: Open Windows Sound Settings and increase microphone volume.\n' ...
+                    '3. Wrong device: Try picking "Microphone Array" explicitly from the device dropdown.\n\n' ...
+                    'You can also load any audio file using "Load WAV..." to test pitch correction immediately.'], ...
+                    recPeak), 'Low Microphone Signal', 'Icon', 'warning');
+            else
+                lblStatus.Text = sprintf('Status: Recorded %.1f s successfully (Peak = %.2f - Good level!). Click "Process Pitch" to tune.', dur, recPeak);
+            end
         catch ME
+            lblStatus.FontColor = [0 0 0];
             uialert(fig, ME.message, 'Recording Error');
         end
     end
@@ -136,8 +220,13 @@ title(axSpec, 'Spectrogram');
             pc_plot_pitch(axPitch, audioData.res);
             pc_plot_spectrum(axSpec, audioData.res, dropSpec.Value);
             
-            lblStatus.Text = sprintf('Status: Complete! Key %s %s, Strength %.0f%%, Retune %d ms.', ...
-                cfg.key, cfg.scale, cfg.strength * 100, round(cfg.retuneMs));
+            if audioData.res.info.silent
+                lblStatus.Text = 'Status: Input is silent or below noise floor. Output is muted.';
+                uialert(fig, 'The audio input was detected as silence or below the noise floor (-46 dBFS). Output is muted to avoid amplifying noise.', 'Silent Input', 'Icon', 'info');
+            else
+                lblStatus.Text = sprintf('Status: Complete! Key %s %s, Strength %.0f%%, Retune %d ms.', ...
+                    cfg.key, cfg.scale, cfg.strength * 100, round(cfg.retuneMs));
+            end
         catch ME
             uialert(fig, ME.message, 'Processing Error');
         end
@@ -155,9 +244,18 @@ title(axSpec, 'Spectrogram');
                 return;
             end
             onStopAudio();
-            audioData.player = audioplayer(audioData.xIn, audioData.fs);
+            playSig = audioData.xIn;
+            if size(playSig, 2) > 1
+                playSig = mean(playSig, 2);
+            end
+            p = max(abs(playSig));
+            if p > 0.0001
+                % Boost playback volume so quiet microphone recordings are clearly audible
+                playSig = playSig * (0.85 / p);
+            end
+            audioData.player = audioplayer(playSig, audioData.fs);
             play(audioData.player);
-            lblStatus.Text = 'Status: Playing original audio...';
+            lblStatus.Text = 'Status: Playing original audio (normalized for clear audibility)...';
         catch ME
             uialert(fig, ME.message, 'Playback Error');
         end
@@ -170,6 +268,10 @@ title(axSpec, 'Spectrogram');
                 return;
             end
             onStopAudio();
+            if audioData.res.info.silent
+                lblStatus.Text = 'Status: Corrected output is silent (input audio was below noise floor).';
+                return;
+            end
             audioData.player = audioplayer(audioData.res.y, audioData.res.fs);
             play(audioData.player);
             lblStatus.Text = 'Status: Playing pitch-corrected audio...';

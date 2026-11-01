@@ -30,14 +30,20 @@ end
 % Remove DC offset
 x = x - mean(x);
 
+% Silence and noise-floor threshold
+% Signals with peak < 0.005 (-46 dBFS) are treated as silence to avoid
+% multiplying ADC noise floor/dither by thousands of times.
+silenceThreshold = 0.005;
+
 peak = max(abs(x));
-if peak < 1e-6
+if peak < silenceThreshold
     x = zeros(size(x));
     info.silent = true;
     info.gain = 1.0;
 else
     info.silent = false;
-    info.gain = 0.95 / peak;
+    % Cap normalization gain to 20x (+26 dB) to prevent noise explosion
+    info.gain = min(20.0, 0.95 / peak);
     x = x * info.gain;
 end
 end
