@@ -83,7 +83,7 @@ dropKey = uidropdown(ctrlGrid, 'Items', {'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', '
 
 uilabel(ctrlGrid, 'Text', 'Target Scale:', 'HorizontalAlignment', 'right', 'FontWeight', 'bold');
 % Default to major so vocal notes snap to distinct scale intervals rather than chromatic micro-steps
-dropScale = uidropdown(ctrlGrid, 'Items', {'major', 'minor', 'chromatic'}, 'Value', 'major');
+dropScale = uidropdown(ctrlGrid, 'Items', {'major', 'minor', 'pentatonic', 'chromatic'}, 'Value', 'major');
 
 lblStrength = uilabel(ctrlGrid, 'Text', 'Strength: 100%', 'HorizontalAlignment', 'right');
 sldStrength = uislider(ctrlGrid, 'Limits', [0, 100], 'Value', 100, ...

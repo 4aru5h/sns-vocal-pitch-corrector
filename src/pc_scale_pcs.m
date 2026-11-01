@@ -58,8 +58,12 @@ switch scaleStr
         intervals = [0, 2, 4, 5, 7, 9, 11];
     case "minor"
         intervals = [0, 2, 3, 5, 7, 8, 10];
+    case {"pentatonic", "pentatonic_major", "major_pentatonic"}
+        intervals = [0, 2, 4, 7, 9];
+    case {"minor_pentatonic", "pentatonic_minor"}
+        intervals = [0, 3, 5, 7, 10];
     otherwise
-        error('pc_scale_pcs:invalidScaleType', 'Invalid scale type: "%s". Must be chromatic, major, or minor.', scaleStr);
+        error('pc_scale_pcs:invalidScaleType', 'Invalid scale type: "%s". Must be chromatic, major, minor, or pentatonic.', scaleStr);
 end
 
 pcs = mod(key_pc + intervals, 12);
