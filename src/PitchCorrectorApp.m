@@ -82,16 +82,17 @@ uilabel(ctrlGrid, 'Text', 'Musical Key:', 'HorizontalAlignment', 'right', 'FontW
 dropKey = uidropdown(ctrlGrid, 'Items', {'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'}, 'Value', 'C');
 
 uilabel(ctrlGrid, 'Text', 'Target Scale:', 'HorizontalAlignment', 'right', 'FontWeight', 'bold');
-dropScale = uidropdown(ctrlGrid, 'Items', {'chromatic', 'major', 'minor'}, 'Value', 'chromatic');
+% Default to major so vocal notes snap to distinct scale intervals rather than chromatic micro-steps
+dropScale = uidropdown(ctrlGrid, 'Items', {'major', 'minor', 'chromatic'}, 'Value', 'major');
 
 lblStrength = uilabel(ctrlGrid, 'Text', 'Strength: 100%', 'HorizontalAlignment', 'right');
 sldStrength = uislider(ctrlGrid, 'Limits', [0, 100], 'Value', 100, ...
     'ValueChangedFcn', @(s,e) set(lblStrength, 'Text', sprintf('Strength: %d%%', round(s.Value))));
 
-% Row 3 Controls: Retune slider, Playback, Export
-lblRetune = uilabel(ctrlGrid, 'Text', 'Retune: 50 ms', 'HorizontalAlignment', 'right');
-sldRetune = uislider(ctrlGrid, 'Limits', [0, 400], 'Value', 50, ...
-    'ValueChangedFcn', @(s,e) set(lblRetune, 'Text', sprintf('Retune: %d ms', round(s.Value))));
+% Row 3 Controls: Retune slider (default 0 ms for instant hard snap), Playback, Export
+lblRetune = uilabel(ctrlGrid, 'Text', 'Retune: 0 ms (Hard)', 'HorizontalAlignment', 'right');
+sldRetune = uislider(ctrlGrid, 'Limits', [0, 400], 'Value', 0, ...
+    'ValueChangedFcn', @onRetuneChanged);
 
 btnPlayOrig = uibutton(ctrlGrid, 'Text', 'Play Original', 'FontWeight', 'bold', 'ButtonPushedFcn', @onPlayOrig);
 btnPlayCorr = uibutton(ctrlGrid, 'Text', 'Play Corrected', 'FontWeight', 'bold', ...
@@ -101,9 +102,16 @@ btnStop = uibutton(ctrlGrid, 'Text', 'Stop Audio', 'ButtonPushedFcn', @onStopAud
 
 btnExport = uibutton(ctrlGrid, 'Text', 'Export WAV...', 'ButtonPushedFcn', @onExportWav);
 
-% Row 4: Spectrogram toggle & Status
+% Row 4: Presets, Spectrogram toggle & Status
+btnTPain = uibutton(ctrlGrid, 'Text', '⚡ Hard T-Pain Preset', 'FontWeight', 'bold', ...
+                    'BackgroundColor', [0.85 0.45 0.1], 'FontColor', 'w', ...
+                    'ButtonPushedFcn', @onPresetTPain);
+
+btnNatural = uibutton(ctrlGrid, 'Text', 'Natural Pop Preset', ...
+                      'ButtonPushedFcn', @onPresetNatural);
+
 lblStatus = uilabel(ctrlGrid, 'Text', 'Status: Ready. Load a WAV file or click Record Mic to begin.', 'FontWeight', 'bold');
-lblStatus.Layout.Column = [1, 5];
+lblStatus.Layout.Column = [3, 5];
 
 dropSpec = uidropdown(ctrlGrid, 'Items', {'corrected', 'original'}, 'Value', 'corrected', ...
                        'Tooltip', 'Spectrogram view toggle', 'ValueChangedFcn', @onSpecToggle);
@@ -199,6 +207,34 @@ title(axSpec, 'Spectrogram');
         end
     end
 
+    function onRetuneChanged(s, ~)
+        val = round(s.Value);
+        if val == 0
+            set(lblRetune, 'Text', 'Retune: 0 ms (Hard)');
+        else
+            set(lblRetune, 'Text', sprintf('Retune: %d ms', val));
+        end
+    end
+
+    function onPresetTPain(~, ~)
+        sldRetune.Value = 0;
+        set(lblRetune, 'Text', 'Retune: 0 ms (Hard)');
+        sldStrength.Value = 100;
+        set(lblStrength, 'Text', 'Strength: 100%');
+        if strcmp(dropScale.Value, 'chromatic')
+            dropScale.Value = 'major';
+        end
+        lblStatus.Text = 'Status: Preset loaded: Hard T-Pain (Retune 0ms, Strength 100%, Major Scale). Click "Process Pitch"!';
+    end
+
+    function onPresetNatural(~, ~)
+        sldRetune.Value = 60;
+        set(lblRetune, 'Text', 'Retune: 60 ms');
+        sldStrength.Value = 85;
+        set(lblStrength, 'Text', 'Strength: 85%');
+        lblStatus.Text = 'Status: Preset loaded: Natural Pop (Retune 60ms, Strength 85%). Click "Process Pitch"!';
+    end
+
     function onProcess(~, ~)
         try
             if isempty(audioData.xIn)
@@ -213,6 +249,8 @@ title(axSpec, 'Spectrogram');
             cfg.scale = dropScale.Value;
             cfg.strength = sldStrength.Value / 100;
             cfg.retuneMs = sldRetune.Value;
+            % Allow full melodic shifts across scale intervals
+            cfg.maxShiftSemis = 6.0;
             
             audioData.res = pc_process(audioData.xIn, audioData.fs, cfg);
             
