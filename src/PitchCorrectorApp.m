@@ -582,7 +582,7 @@ classdef PitchCorrectorApp < handle
             fsDemo = 44100;
             N = round(2.7 * fsDemo);
             t = (0:N-1)' / fsDemo;
-            notesMidi = [59.65, 62.30, 63.70, 67.35, 64.30, 60.25]; % C4 - D4 - E4 - G4 - E4 - C4
+            notesMidi = [60.25, 62.30, 64.25, 67.35, 64.30, 60.25]; % C4 - D4 - E4 - G4 - E4 - C4
             numNotes  = numel(notesMidi);
             segLen    = floor(N / numNotes);
 

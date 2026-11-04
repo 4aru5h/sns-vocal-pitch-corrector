@@ -21,7 +21,7 @@ t = (0:N-1)' / fs;
 
 % 6-note C-major vocal run: C4 -> D4 -> E4 -> G4 -> E4 -> C4
 % With intentional flat/sharp vocal offsets and smooth pitch glides between notes
-notesMidi = [59.65, 62.30, 63.70, 67.35, 64.30, 60.25];
+notesMidi = [60.25, 62.30, 64.25, 67.35, 64.30, 60.25];
 numNotes  = numel(notesMidi);
 segLen    = floor(N / numNotes);
 
