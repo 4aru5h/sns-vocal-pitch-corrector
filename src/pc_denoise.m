@@ -1,12 +1,12 @@
 function [y, denoiseInfo] = pc_denoise(x, fs, cfg)
-%PC_DENOISE Stationary noise estimation and decision-directed soft spectral gating.
+%PC_DENOISE Transparent stationary noise estimation and soft spectral gating.
 %   [y, denoiseInfo] = PC_DENOISE(x, fs, cfg) estimates the stationary
-%   background noise PSD using quiet-frame detection (when pauses exist) and
-%   inter-harmonic spectral valley quantiles (when the input is continuous),
-%   then applies a smooth decision-directed Wiener spectral gain in Base MATLAB.
+%   background noise PSD from quiet frames or inter-harmonic valleys and
+%   attenuates background hiss while keeping 100% unity gain (G = 1.0) on
+%   active vocal harmonics so the voice never sounds muffled or watery.
 %
-%   Automatically bypasses gating when the estimated SNR exceeds 40 dB so clean
-%   studio or synthetic test signals remain mathematically unaltered.
+%   Automatically bypasses gating when the estimated SNR exceeds 32 dB so
+%   clean studio/mic recordings and test tones remain completely unaltered.
 
     arguments
         x (:,1) double {mustBeReal, mustBeFinite}
@@ -76,9 +76,8 @@ function [y, denoiseInfo] = pc_denoise(x, fs, cfg)
     sigPowEst = sortedPow(max(1, round(0.88 * M_int)));
     minPowEst = sortedPow(max(1, round(0.15 * M_int)));
 
-    % Inter-harmonic spectral floor (30th percentile across frequency bins)
-    % Accurately measures broadband noise even when a tone/vowel has no pauses
-    interHarmonicFloor = prctile_col(interiorMagSq(vocalBins, :), 0.30) * 1.45;
+    % Inter-harmonic spectral floor (25th percentile across frequency bins)
+    interHarmonicFloor = prctile_col(interiorMagSq(vocalBins, :), 0.25) * 1.35;
     broadbandNoiseBinPow = median(interHarmonicFloor);
 
     % Check whether the recording contains genuine quiet pause frames
@@ -91,8 +90,6 @@ function [y, denoiseInfo] = pc_denoise(x, fs, cfg)
         noisePsd  = mean(interiorMagSq(:, noiseMask), 2) * 1.15;
         noisePowEst = max(mean(noisePsd(vocalBins)), 1e-20);
     else
-        % Continuous signal without pauses: estimate white/smooth noise floor
-        % from inter-harmonic valleys so sustained harmonics are never cancelled
         noiseMask = framePow <= sortedPow(max(1, round(0.25 * M_int)));
         noisePsd  = repmat(max(broadbandNoiseBinPow, 1e-20), nBins, 1);
         noisePowEst = max(broadbandNoiseBinPow, 1e-20);
@@ -104,17 +101,17 @@ function [y, denoiseInfo] = pc_denoise(x, fs, cfg)
     denoiseInfo.noiseFloorDb   = noiseFloorDb;
     denoiseInfo.estimatedSnrDb = estSnrDb;
 
-    % Bypass if signal is already studio-clean (SNR > 40 dB)
-    if estSnrDb > 40
+    % Bypass if signal is already clean (SNR > 32 dB) so vocals are untouched
+    if estSnrDb > 32
         y = x;
         return;
     end
 
-    % Decision-directed soft Wiener spectral gating
+    % Transparent soft Wiener gating: unity gain on harmonics, strong gate in pauses
     strength = min(max(cfg.denoiseStrength, 0), 2.0);
-    overSub  = 1.0 + 1.6 * strength;           % Oversubtraction factor beta
-    gFloor   = 10^(-(14 + 6 * strength) / 20); % Spectral floor (-14 to -26 dB)
-    alphaDD  = 0.90;                           % Decision-directed smoothing
+    overSub  = 1.0 + 1.2 * strength;
+    gFloor   = 10^(-(14 + 6 * strength) / 20);
+    alphaDD  = 0.88;
 
     G = ones(nBins, numFrames);
     G_prev = ones(nBins, 1);
@@ -125,9 +122,13 @@ function [y, denoiseInfo] = pc_denoise(x, fs, cfg)
         gamma = magSq(:, m) ./ scaledNoise;
         xi = alphaDD * (G_prev.^2 .* gamma_prev) + (1 - alphaDD) * max(gamma - 1.0, 0);
         g_curr = xi ./ (xi + 1.0);
+
+        % Keep 100% unity gain on strong vocal harmonics (gamma > 3.5)
+        % so the voice timbre is never muffled or watery
+        g_curr(gamma > 3.5) = 1.0;
         g_curr = max(gFloor, min(1.0, g_curr));
 
-        % 3-bin frequency smoothing [0.25, 0.5, 0.25] to suppress musical noise
+        % 3-bin frequency smoothing [0.25, 0.5, 0.25] to prevent musical noise
         if nBins >= 5
             g_smooth = g_curr;
             g_smooth(2:end-1) = 0.25 * g_curr(1:end-2) + 0.50 * g_curr(2:end-1) + 0.25 * g_curr(3:end);

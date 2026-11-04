@@ -8,8 +8,8 @@ function cfg = pc_default_config()
     cfg.fs                    = 44100;
     cfg.key                   = 'C';
     cfg.scale                 = 'major';
-    cfg.strength              = 1.0;        % [0, 1]
-    cfg.retuneMs              = 0;          % [0, 200] ms
+    cfg.strength              = 1.0;        % [0, 1] (100% Auto-Tune snap)
+    cfg.retuneMs              = 0;          % [0, 200] ms (0 ms = hard Auto-Tune)
     cfg.maxShiftSemis         = 12.0;       % max pitch shift in semitones
 
     % Preprocessing, Noise Reduction & Vocal Conditioning
@@ -17,18 +17,18 @@ function cfg = pc_default_config()
     cfg.denoiseStrength       = 1.0;        % [0, 2] oversubtraction strength
     cfg.vocalFilterEnable     = true;       % Zero-phase Butterworth HPF + LPF
     cfg.highPassHz            = 55;         % Sub-vocal rumble cutoff (Hz)
-    cfg.lowPassHz             = 10000;      % High-frequency hiss cutoff (Hz)
+    cfg.lowPassHz             = 16000;      % Preserve vocal air & clarity up to 16 kHz
     cfg.silencePeakThreshold  = 1e-4;       % Digital silence / idle ADC gate (-80 dBFS)
 
     % YIN Pitch Detector parameters (both nested and flat for compatibility)
     cfg.f0Min                 = 80;         % Hz (~E2)
     cfg.f0Max                 = 1000;       % Hz (~B5)
     cfg.yinThreshold          = 0.15;       % CMNDF dip threshold
-    cfg.yinFrameMs            = 40;         % analysis window (ms)
-    cfg.yinHopMs              = 5;          % hop size (ms)
+    cfg.yinFrameMs            = 30;         % Responsive 30 ms analysis window
+    cfg.yinHopMs              = 5;          % 5 ms hop size (200 Hz frame rate)
     cfg.voicedRmsGate         = 0.015;      % relative to signal RMS
     cfg.voicedMaxAperiodicity = 0.45;       % reject frames with d'(tau) > this
-    cfg.medianFilterFrames    = 5;          % post-YIN median smoothing (odd)
+    cfg.medianFilterFrames    = 3;          % 3-frame median filter (preserves fast note steps)
 
     cfg.yin = struct( ...
         'fmin',                  cfg.f0Min, ...
@@ -41,7 +41,7 @@ function cfg = pc_default_config()
         'medianFilterFrames',    cfg.medianFilterFrames);
 
     % Scale Mapping & Contour Smoothing
-    cfg.hysteresisSemis       = 0.15;       % 15-cent deadband to prevent note chatter
+    cfg.hysteresisSemis       = 0.10;       % 10-cent deadband prevents boundary chatter while allowing crisp note steps
 
     % TD-PSOLA Resynthesis parameters
     cfg.maxPitchRatio         = 2.0;        % clamp synthesis ratio

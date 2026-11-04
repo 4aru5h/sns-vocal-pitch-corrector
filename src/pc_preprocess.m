@@ -29,7 +29,7 @@ function [x, info] = pc_preprocess(xIn, fs, cfg)
     if ~isfield(cfg, 'denoiseStrength'),      cfg.denoiseStrength      = 1.0;   end
     if ~isfield(cfg, 'vocalFilterEnable'),    cfg.vocalFilterEnable    = true;  end
     if ~isfield(cfg, 'highPassHz'),           cfg.highPassHz           = 55;    end
-    if ~isfield(cfg, 'lowPassHz'),            cfg.lowPassHz            = 10000; end
+    if ~isfield(cfg, 'lowPassHz'),            cfg.lowPassHz            = 16000; end
     if ~isfield(cfg, 'silencePeakThreshold'), cfg.silencePeakThreshold = 1e-4;  end
 
     x = double(xIn);
@@ -91,7 +91,7 @@ function [x, info] = pc_preprocess(xIn, fs, cfg)
         [xClean, denoiseInfo] = pc_denoise(xClean, fs, cfg);
     end
 
-    % 5. Vocal bandpass conditioning (high-pass rumble filter + low-pass hiss filter)
+    % 5. Vocal bandpass conditioning (high-pass rumble filter + ultrasonic filter)
     vocalFilterApplied = false;
     if cfg.vocalFilterEnable
         vfCfg = struct('enableHighPass', true, 'enableLowPass', true, ...
