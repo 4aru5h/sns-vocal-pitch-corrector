@@ -1,6 +1,6 @@
 # Digital Vocal Pitch Corrector (AutoTune) in Base MATLAB
 
-A digital vocal pitch correction system implemented entirely in base MATLAB without relying on external toolboxes (no Signal Processing Toolbox or Audio Toolbox).
+A digital vocal pitch correction system implemented entirely in base MATLAB without using external toolboxes (no Signal Processing Toolbox or Audio Toolbox).
 
 I built every stage of the DSP chain from first principles for my university Signals and Systems coursework: input conditioning, spectral noise reduction, zero-phase filtering, YIN pitch detection, MIDI scale quantization, retune trajectory smoothing, and TD-PSOLA resynthesis.
 
